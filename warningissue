@@ -1,0 +1,122 @@
+import React, { useState, useEffect } from "react";
+import { MapContainer, TileLayer, FeatureGroup } from "react-leaflet";
+import { EditControl } from "react-leaflet-draw";
+import L from "leaflet";
+import * as turf from "@turf/turf";
+import "leaflet/dist/leaflet.css";
+import "leaflet-draw/dist/leaflet.draw.css";
+import "./App.css";
+
+const App = () => {
+  const [warnings, setWarnings] = useState(
+    JSON.parse(localStorage.getItem("warnings")) || []
+  );
+  const [countyData, setCountyData] = useState(null);
+
+  // Load county data
+  useEffect(() => {
+    fetch("https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json")
+      .then((res) => res.json())
+      .then((data) => setCountyData(data));
+  }, []);
+
+  // Save warnings to localStorage
+  useEffect(() => {
+    localStorage.setItem("warnings", JSON.stringify(warnings));
+  }, [warnings]);
+
+  // Handle new warning creation
+  const onCreated = (e) => {
+    const layer = e.layer;
+    const coordinates = layer.toGeoJSON().geometry.coordinates[0];
+
+    // Detect intersecting counties
+    const affectedCounties = [];
+    if (countyData) {
+      countyData.features.forEach((county) => {
+        if (turf.booleanIntersects(layer.toGeoJSON(), county)) {
+          affectedCounties.push(county.properties.name);
+        }
+      });
+    }
+
+    const newWarning = {
+      id: Date.now(),
+      type: "Severe Thunderstorm Warning",
+      description: "This is a test description.",
+      counties: affectedCounties,
+      coords: coordinates,
+    };
+
+    setWarnings([...warnings, newWarning]);
+    layer.remove(); // Remove temporary drawn layer
+  };
+
+  // Handle deletion
+  const deleteWarning = (id) => {
+    setWarnings(warnings.filter((warning) => warning.id !== id));
+  };
+
+  return (
+    <div>
+      <div className="header">
+        <h1>NWS Warnings Map</h1>
+      </div>
+      <MapContainer center={[37.8, -96]} zoom={4} style={{ height: "70vh" }}>
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="© OpenStreetMap contributors"
+        />
+        <FeatureGroup>
+          <EditControl
+            position="topright"
+            onCreated={onCreated}
+            draw={{
+              polyline: true,
+              polygon: false,
+              rectangle: true,
+              circle: false,
+              marker: false,
+              circlemarker: false,
+            }}
+          />
+        </FeatureGroup>
+        {warnings.map((warning) => (
+          <L.Polygon
+            positions={warning.coords}
+            key={warning.id}
+            eventHandlers={{
+              mouseover: () => {
+                const info = `
+                  <strong>${warning.type}</strong><br />
+                  ${warning.description}<br />
+                  Counties: ${warning.counties.join(", ")}
+                `;
+                // Show info in a tooltip
+                L.popup().setLatLng(warning.coords[0]).setContent(info).openOn();
+              },
+              click: () => deleteWarning(warning.id),
+            }}
+            pathOptions={{
+              color: "red",
+              fillOpacity: 0.4,
+            }}
+          />
+        ))}
+      </MapContainer>
+      <div className="footer">
+        <h2>Active Warnings</h2>
+        <ul>
+          {warnings.map((warning) => (
+            <li key={warning.id}>
+              {warning.type} - {warning.counties.length} counties
+              <button onClick={() => deleteWarning(warning.id)}>Delete</button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+};
+
+export default App;
